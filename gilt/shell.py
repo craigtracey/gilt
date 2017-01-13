@@ -26,7 +26,7 @@ import click
 import fasteners
 
 import gilt
-from gilt import config
+from gilt.config import Config
 from gilt import git
 from gilt import util
 
@@ -65,25 +65,30 @@ def overlay(ctx):  # pragma: no cover
     args = ctx.obj.get('args')
     filename = args.get('config')
     debug = args.get('debug')
-    _setup(filename)
 
-    for c in config.config(filename):
-        with fasteners.InterProcessLock(c.lock_file):
-            util.print_info('{}:'.format(c.name))
-            if not os.path.exists(c.src):
-                git.clone(c.name, c.git, c.src, debug=debug)
-            if c.dst:
-                git.extract(c.src, c.dst, c.version, debug=debug)
-            else:
-                git.overlay(c.src, c.files, c.version, debug=debug)
+    config = Config.from_file(filename)
+    _setup_environment(config)
+
+    with fasteners.InterProcessLock(config.lock_file):
+        for overlay in config.overlays:
+            util.print_info('{}:'.format(overlay.name))
+        
+            git_destination = os.path.join(config.clone_dir, overlay.name)
+            git.clone(overlay.name, overlay.git, git_destination)
+
+            for transform in overlay.file_tranforms:
+                                
+            #if not os.path.exists(c.src):
+            #    git.clone(c.name, c.git, c.src, debug=debug)
+            #if c.dst:
+            #    git.extract(c.src, c.dst, c.version, debug=debug)
+            #else:
+            #    git.overlay(c.src, c.files, c.version, debug=debug)
 
 
-def _setup(filename):
-    if not os.path.exists(filename):
-        msg = 'Unable to find {}. Exiting.'.format(filename)
-        raise NotFoundError(msg)
-
-    working_dirs = [config._get_lock_dir(), config._get_clone_dir()]
+def _setup_environment(config):
+    print config.clone_dir
+    working_dirs = (config.base_dir, config.clone_dir,)
     for working_dir in working_dirs:
         if not os.path.exists(working_dir):
             os.makedirs(working_dir)

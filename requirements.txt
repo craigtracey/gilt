@@ -2,6 +2,7 @@ click
 colorama
 fasteners
 giturlparse.py
+marshmallow
 pbr
 PyYAML
 sh
