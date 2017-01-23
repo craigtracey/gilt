@@ -21,14 +21,32 @@
 #  DEALINGS IN THE SOFTWARE.
 
 import os
+import logging
+import sys
 
 import click
-import fasteners
 
 import gilt
 from gilt.config import Config
-from gilt import git
-from gilt import util
+from gilt import overlay as gilt_overlay
+
+LOG = logging.getLogger(__name__)
+
+
+def _setup_logger(level=logging.INFO):
+    logger = logging.getLogger()
+    logger.setLevel(level)
+    log_handler = logging.StreamHandler(sys.stdout)
+    fmt = logging.Formatter(
+        fmt='%(asctime)s %(name)s '
+        '%(levelname)s: %(message)s',
+        datefmt='%F %H:%M:%S')
+    log_handler.setFormatter(fmt)
+    logger.addHandler(log_handler)
+
+    # sh.command is noisy in INFO, always set it to WARNING
+    if level >= logging.INFO:
+        logging.getLogger('sh.command').setLevel(logging.WARNING)
 
 
 class NotFoundError(Exception):
@@ -43,55 +61,34 @@ def main():
 
 @click.group()
 @click.option(
-    '--config',
-    default='gilt.yml',
-    help='Path to config file.  Default gilt.yml')
-@click.option(
     '--debug/--no-debug',
     default=False,
     help='Enable or disable debug mode. Default is disabled.')
 @click.version_option(version=gilt.__version__)
 @click.pass_context
-def cli(ctx, config, debug):  # pragma: no cover
-    ctx.obj['args'] = {}
-    ctx.obj['args']['debug'] = debug
-    ctx.obj['args']['config'] = config
+def cli(ctx, debug):  # pragma: no cover
+    level = logging.INFO
+    if debug:
+        level = logging.DEBUG
+    _setup_logger(level)
 
 
 @click.command()
+@click.option(
+    '--config',
+    'configfile',
+    default='gilt.yml',
+    help='Path to config file. Default: gilt.yml')
+@click.option('--output-dir', default=os.getcwd(), help='Output path')
 @click.pass_context
-def overlay(ctx):  # pragma: no cover
+def overlay(ctx, configfile, output_dir):  # pragma: no cover
     """ Install gilt dependencies """
-    args = ctx.obj.get('args')
-    filename = args.get('config')
-    debug = args.get('debug')
 
-    config = Config.from_file(filename)
-    _setup_environment(config)
+    if not os.path.exists(output_dir):
+        os.makedirs(output_dir)
 
-    with fasteners.InterProcessLock(config.lock_file):
-        for overlay in config.overlays:
-            util.print_info('{}:'.format(overlay.name))
-        
-            git_destination = os.path.join(config.clone_dir, overlay.name)
-            git.clone(overlay.name, overlay.git, git_destination)
-
-            for transform in overlay.file_tranforms:
-                                
-            #if not os.path.exists(c.src):
-            #    git.clone(c.name, c.git, c.src, debug=debug)
-            #if c.dst:
-            #    git.extract(c.src, c.dst, c.version, debug=debug)
-            #else:
-            #    git.overlay(c.src, c.files, c.version, debug=debug)
-
-
-def _setup_environment(config):
-    print config.clone_dir
-    working_dirs = (config.base_dir, config.clone_dir,)
-    for working_dir in working_dirs:
-        if not os.path.exists(working_dir):
-            os.makedirs(working_dir)
+    config = Config.from_file(configfile)
+    gilt_overlay(config, output_dir)
 
 
 cli.add_command(overlay)
