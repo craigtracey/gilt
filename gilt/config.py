@@ -22,6 +22,7 @@
 
 import os
 import re
+import uuid
 
 import yaml
 
@@ -63,7 +64,7 @@ class OverlayConfigSchema(LoadedSchema):
 class ConfigSchema(LoadedSchema):
 
     overlays = fields.List(fields.Nested(OverlayConfigSchema()))
-    base_dir = fields.String(default=DEFAULT_BASE_DIR)
+    base_dir = fields.String()
     lock_file = fields.String()
     clone_dir = fields.String()
 
@@ -106,13 +107,19 @@ class OverlayConfig(object):
 class Config(object):
     def __init__(self,
                  overlays=[],
-                 base_dir=DEFAULT_BASE_DIR,
+                 base_dir=None,
                  lock_file=None,
                  clone_dir=None):
         self.overlays = overlays
-        self.base_dir = base_dir
+        self._base_dir = base_dir
         self._lock_file = lock_file
         self._clone_dir = clone_dir
+
+    @property
+    def base_dir(self):
+        if not self._base_dir:
+            self._base_dir = os.path.join(DEFAULT_BASE_DIR, str(uuid.uuid4()))
+        return self._base_dir
 
     @property
     def lock_file(self):

@@ -28,7 +28,7 @@ import click
 
 import gilt
 from gilt.config import Config
-from gilt import overlay as gilt_overlay
+from gilt.overlay import OverlayEngine
 
 LOG = logging.getLogger(__name__)
 
@@ -43,10 +43,6 @@ def _setup_logger(level=logging.INFO):
         datefmt='%F %H:%M:%S')
     log_handler.setFormatter(fmt)
     logger.addHandler(log_handler)
-
-    # sh.command is noisy in INFO, always set it to WARNING
-    if level >= logging.INFO:
-        logging.getLogger('sh.command').setLevel(logging.WARNING)
 
 
 class NotFoundError(Exception):
@@ -80,15 +76,18 @@ def cli(ctx, debug):  # pragma: no cover
     default='gilt.yml',
     help='Path to config file. Default: gilt.yml')
 @click.option('--output-dir', default=os.getcwd(), help='Output path')
+@click.option(
+    '--cleanup/--no-cleanup', default=True, help="Don't cleanup at completion")
 @click.pass_context
-def overlay(ctx, configfile, output_dir):  # pragma: no cover
+def overlay(ctx, configfile, output_dir, cleanup):  # pragma: no cover
     """ Install gilt dependencies """
 
     if not os.path.exists(output_dir):
         os.makedirs(output_dir)
 
     config = Config.from_file(configfile)
-    gilt_overlay(config, output_dir)
+    engine = OverlayEngine(config, cleanup)
+    engine.overlay(output_dir)
 
 
 cli.add_command(overlay)

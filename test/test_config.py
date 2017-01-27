@@ -24,7 +24,7 @@ import os
 
 import pytest
 
-from gilt.config import Config, ParseError
+from gilt.config import Config, ParseError, DEFAULT_BASE_DIR
 
 
 @pytest.mark.parametrize(
@@ -38,7 +38,7 @@ def test_config(gilt_config_file):
     assert 'master' == r.version
     assert 'ansible-etcd' == r.name
     assert 'roles/retr0h.ansible-etcd/' == r.dst
-    assert 'roles/retr0h.ansible-etcd/' == r.files[0].dst 
+    assert 'roles/retr0h.ansible-etcd/' == r.files[0].dst
     assert 1 == len(r.files)
 
     r = result.overlays[1]
@@ -46,7 +46,7 @@ def test_config(gilt_config_file):
     assert 'master' == r.version
     assert 'openstack-ansible-modules' == r.name
     assert r.dst is None
-    
+
     f = r.files[0]
     assert f.src == '*_manage'
     assert f.dst == 'library/'
@@ -106,7 +106,7 @@ def missing_files_dst_key_data():
 
 
 @pytest.mark.parametrize(
-    'gilt_config_file', 
+    'gilt_config_file',
     ['missing_files_src_key_data', 'missing_files_dst_key_data'],
     indirect=['gilt_config_file'])
 def test_config_missing_files_src_key(gilt_config_file):
@@ -124,3 +124,11 @@ def invalid_gilt_data():
 def test_get_config_handles_parse_error(gilt_config_file):
     with pytest.raises(ParseError):
         Config.from_file(gilt_config_file)
+
+
+def test_autogen_fields():
+    config = Config()
+    assert [] == config.overlays
+    assert DEFAULT_BASE_DIR == config.base_dir
+    assert os.path.join(DEFAULT_BASE_DIR, 'lock') == config.lock_file
+    assert os.path.join(DEFAULT_BASE_DIR, 'clone') == config.clone_dir

@@ -21,16 +21,20 @@
 #  DEALINGS IN THE SOFTWARE.
 
 import glob
+import logging
 import os
 import re
 import shutil
+import tempfile
 
 import sh
 
 from gilt import util
 
+LOG = logging.getLogger(__name__)
 
-def clone(name, repository, destination, debug=False):
+
+def clone(name, repository, destination, version):
     """
     Clone the specified repository into a temporary directory and return None.
 
@@ -38,71 +42,81 @@ def clone(name, repository, destination, debug=False):
     :param repository: A string containing the repository to clone.
     :param destination: A string containing the directory to clone the
      repository into.
-    :param debug: An optional bool to toggle debug output.
     :return: None
     """
-    msg = '  - cloning {} to {}'.format(name, destination)
-    util.print_info(msg)
-    cmd = sh.git.bake('clone', repository, destination)
-    util.run_command(cmd, debug=debug)
+    temp_dir = tempfile.mkdtemp()
+    LOG.info('Cloning %s to %s', name, temp_dir)
+    clone_dir = os.path.join(temp_dir, 'clone')
+    cmd = sh.git.bake('clone', repository, clone_dir)
+    util.run_command(cmd)
 
-
-def extract(repository, destination, version, debug=False):
-    """
-    Extract the specified repository/version into the given directory and
-    return None.
-
-    :param repository: A string containing the path to the repository to be
-     extracted.
-    :param destination: A string containing the directory to clone the
-     repository into.  Relative to the directory ``gilt`` is running
-     in. Must end with a '/'.
-    :param version: A string containing the branch/tag/sha to be exported.
-    :param debug: An optional bool to toggle debug output.
-    :return: None
-    """
+    new_dest = None
     with util.saved_cwd():
-        os.chdir(repository)
-        _get_branch(version, debug)
-        cmd = sh.git.bake(
-            'checkout-index', force=True, all=True, prefix=destination)
-        util.run_command(cmd, debug=debug)
-        msg = '  - extracting ({}) {} to {}'.format(version, repository,
-                                                    destination)
-        util.print_info(msg)
+        os.chdir(clone_dir)
+        sha = _get_branch(version)
+        new_dest = os.path.join(destination, "%s-%s" % (name, sha))
+        shutil.copytree(clone_dir, new_dest, symlinks=True)
+
+    shutil.rmtree(temp_dir)
+    return new_dest
 
 
-def overlay(repository, files, version, debug=False):
-    """
-    Overlay files from the specified repository/version into the given
-    directory and return None.
-
-    :param repository: A string containing the path to the repository to be
-     extracted.
-    :param files: A list of `FileConfig` objects.
-    :param version: A string containing the branch/tag/sha to be exported.
-    :param debug: An optional bool to toggle debug output.
-    :return: None
-    """
-    with util.saved_cwd():
-        os.chdir(repository)
-        _get_branch(version, debug)
-
-        for fc in files:
-            if '*' in fc.src:
-                for filename in glob.glob(fc.src):
-                    util.copy(filename, fc.dst)
-                    msg = '  - copied ({}) {} to {}'.format(version, filename,
-                                                            fc.dst)
-                    util.print_info(msg)
-            else:
-                if os.path.isdir(fc.dst) and os.path.isdir(fc.src):
-                    shutil.rmtree(fc.dst)
-                util.copy(fc.src, fc.dst)
-                msg = '  - copied ({}) {} to {}'.format(version, fc.src,
-                                                        fc.dst)
-                util.print_info(msg)
-
+#def extract(repository, destination, version, debug=False):
+#    """
+#    Extract the specified repository/version into the given directory and
+#    return None.
+#
+#    :param repository: A string containing the path to the repository to be
+#     extracted.
+#    :param destination: A string containing the directory to clone the
+#     repository into.  Relative to the directory ``gilt`` is running
+#     in. Must end with a '/'.
+#    :param version: A string containing the branch/tag/sha to be exported.
+#    :param debug: An optional bool to toggle debug output.
+#    :return: None
+#    """
+#    with util.saved_cwd():
+#        os.chdir(repository)
+#        _get_branch(version, debug)
+#        cmd = sh.git.bake(
+#            'checkout-index', force=True, all=True, prefix=destination)
+#        util.run_command(cmd)
+#        msg = '  - extracting ({}) {} to {}'.format(version, repository,
+#                                                    destination)
+#        util.print_info(msg)
+#
+#
+#def overlay(repository, files, version, debug=False):
+#    """
+#    Overlay files from the specified repository/version into the given
+#    directory and return None.
+#
+#    :param repository: A string containing the path to the repository to be
+#     extracted.
+#    :param files: A list of `FileConfig` objects.
+#    :param version: A string containing the branch/tag/sha to be exported.
+#    :param debug: An optional bool to toggle debug output.
+#    :return: None
+#    """
+#    with util.saved_cwd():
+#        os.chdir(repository)
+#        _get_branch(version, debug)
+#
+#        for fc in files:
+#            if '*' in fc.src:
+#                for filename in glob.glob(fc.src):
+#                    util.copy(filename, fc.dst)
+#                    msg = '  - copied ({}) {} to {}'.format(version, filename,
+#                                                            fc.dst)
+#                    util.print_info(msg)
+#            else:
+#                if os.path.isdir(fc.dst) and os.path.isdir(fc.src):
+#                    shutil.rmtree(fc.dst)
+#                util.copy(fc.src, fc.dst)
+#                msg = '  - copied ({}) {} to {}'.format(version, fc.src,
+#                                                        fc.dst)
+#                util.print_info(msg)
+#
 
 def _get_branch(version, debug=False):
     """
@@ -118,11 +132,14 @@ def _get_branch(version, debug=False):
     :return: None
     """
     cmd = sh.git.bake('fetch')
-    util.run_command(cmd, debug=debug)
+    util.run_command(cmd)
     cmd = sh.git.bake('checkout', version)
-    util.run_command(cmd, debug=debug)
+    util.run_command(cmd)
     cmd = sh.git.bake('clean', '-d', '-x', '-f')
-    util.run_command(cmd, debug=debug)
+    util.run_command(cmd)
     if not re.match(r'\b[0-9a-f]{7,40}\b', str(version)):
         cmd = sh.git.bake('pull', rebase=True, ff_only=True)
-        util.run_command(cmd, debug=debug)
+        util.run_command(cmd)
+    cmd = sh.git.bake('rev-parse', 'HEAD')
+    sha = util.run_command(cmd)
+    return str(sha)[:6]

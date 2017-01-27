@@ -22,12 +22,16 @@
 
 import contextlib
 import errno
+import logging
 import os
 import shutil
 
 import colorama
 
 colorama.init(autoreset=True)
+
+LOG = logging.getLogger(__name__)
+logging.getLogger('sh').setLevel(logging.WARNING)
 
 
 def print_info(msg):
@@ -40,20 +44,16 @@ def print_warn(msg):
     print '{}{}'.format(colorama.Fore.YELLOW, msg)
 
 
-def run_command(cmd, debug=False):
+def run_command(cmd):
     """
     Execute the given command and return None.
 
     :param cmd: A `sh.Command` object to execute.
-    :param debug: An optional bool to toggle debug output.
     :return: None
     """
-    if debug:
-        msg = '  PWD: {}'.format(os.getcwd())
-        print_warn(msg)
-        msg = '  COMMAND: {}'.format(cmd)
-        print_warn(msg)
-    cmd()
+    LOG.debug('  PWD: %s', os.getcwd())
+    LOG.debug('  COMMAND: %s', cmd)
+    return cmd()
 
 
 @contextlib.contextmanager

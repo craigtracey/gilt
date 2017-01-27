@@ -26,79 +26,74 @@ import logging
 import os
 import signal
 import shutil
-import uuid
-
-import pbr.version
+import sys
 
 from gilt import git
-from gilt import util
 
 LOG = logging.getLogger(__name__)
 
-try:
-    version_info = pbr.version.VersionInfo('gilt')
-    __version__ = pbr.version_info.release_string()
-except AttributeError:
-    __version__ = None
 
-base_clone_dir = None
+class OverlayEngine(object):
+    def __init__(self, config, cleanup=True):
+        self.config = config
+        self.cleanup = cleanup
+        self._working_dir = None
 
+        signal.signal(signal.SIGINT, self._cleanup)
+        signal.signal(signal.SIGTERM, self._cleanup)
 
-def _setup_environment(config):
-    working_dirs = (
-        config.base_dir,
-        config.clone_dir, )
-    for working_dir in working_dirs:
-        if not os.path.exists(working_dir):
-            os.makedirs(working_dir)
+    def _setup_environment(self):
+        working_dirs = (
+            self.config.base_dir,
+            self.config.clone_dir, )
+        for working_dir in working_dirs:
+            if not os.path.exists(working_dir):
+                os.makedirs(working_dir)
 
+    def _cleanup(self, signal=None, frame=None):
+        LOG.debug("Handling signal %s / %s", signal, locals())
+        if not self.cleanup:
+            LOG.info("Not cleaning up as specified on CLI")
+            return
 
-def _cleanup(signal=None, frame=None):
+        LOG.info("Cleaning up %s", self._working_dir)
+        if self._working_dir and os.path.exists(self._working_dir):
+            shutil.rmtree(self._working_dir)
 
-    if base_clone_dir and os.path.exists(base_clone_dir):
-        shutil.rmtree(base_clone_dir)
+        if signal:
+            sys.exit(-1)
 
+    def overlay(self, output_dir):
+        self._setup_environment()
 
-signal.signal(signal.SIGINT, _cleanup)
-signal.signal(signal.SIGTERM, _cleanup)
+        self._working_dir = self.config.base_dir
+        clone_dir = os.path.join(self._working_dir, 'clone')
 
+        with fasteners.InterProcessLock(self.config.lock_file):
+            LOG.debug("Using lock file: %s", self.config.lock_file)
 
-def overlay(config, output_dir):
+            for overlay in self.config.overlays:
+                LOG.info("Cloning %s:%s", overlay.name, overlay.version)
+                repo_dir = git.clone(overlay.name, overlay.git, clone_dir,
+                                     overlay.version)
 
-    _setup_environment(config)
+                LOG.info("Cloned to %s", repo_dir)
+                for transform in overlay.files:
+                    src = os.path.join(repo_dir, transform.src)
+                    dest = os.path.join(output_dir, transform.dst)
 
-    global base_clone_dir
-    id = str(uuid.uuid4())
-    base_clone_dir = os.path.join(config.clone_dir, id)
+                    if not os.path.exists(dest) and dest.endswith(os.path.sep):
+                        os.makedirs(dest)
 
-    with fasteners.InterProcessLock(config.lock_file):
-        id = str(uuid.uuid4())
+                    for path in glob.glob(src):
+                        LOG.info("Copying %s to %s", path, dest)
+                        if os.path.isfile(path):
+                            destdir = os.path.dirname(dest)
+                            if not os.path.exists(destdir):
+                                os.makedirs(destdir)
+                            shutil.copy(path, dest)
+                        elif os.path.isdir(path):
+                            dest = os.path.join(dest, os.path.basename(path))
+                            shutil.copytree(path, dest, symlinks=True)
 
-        for overlay in config.overlays:
-            util.print_info('{}:'.format(overlay.name))
-
-            clone_dir = os.path.join(config.clone_dir, id,
-                                     "%s-%s" % (overlay.name, overlay.version))
-            git.clone(overlay.name, overlay.git, clone_dir)
-            git.extract(overlay.git, overlay.version)
-
-
-            for transform in overlay.files:
-                src = os.path.join(clone_dir, transform.src)
-                dest = os.path.join(output_dir, transform.dst)
-
-                if not os.path.exists(dest) and dest.endswith(os.path.sep):
-                    os.makedirs(dest)
-
-                for path in glob.glob(src):
-                    LOG.info("Copying %s to %s", path, dest)
-                    if os.path.isfile(path):
-                        destdir = os.path.dirname(dest)
-                        if not os.path.exists(destdir):
-                            os.makedirs(destdir)
-                        shutil.copy(path, dest)
-                    elif os.path.isdir(path):
-                        dest = os.path.join(dest, os.path.basename(path))
-                        shutil.copytree(path, dest, symlinks=True)
-
-    _cleanup()
+        self._cleanup()
